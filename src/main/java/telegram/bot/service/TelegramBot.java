@@ -6,6 +6,8 @@ import java.util.ArrayList;
 import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands;
@@ -22,7 +24,9 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKe
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.KeyboardRow;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import telegram.bot.config.BotConfig;
+import telegram.bot.model.Ad;
 import telegram.bot.model.User;
+import telegram.bot.repository.AdRepository;
 import telegram.bot.repository.UserRepository;
 
 @Component
@@ -39,6 +43,8 @@ public class TelegramBot extends TelegramLongPollingBot {
     public static final String NO_BUTTON = "NO_BUTTON";
     public static final String ERROR_TEXT = "Error occurred: ";
     private final BotConfig botConfig;
+    @Autowired
+    private AdRepository adRepository;
     @Autowired
     private UserRepository userRepository;
 
@@ -76,7 +82,7 @@ public class TelegramBot extends TelegramLongPollingBot {
             if (messageText.contains("/send") && botConfig.getBotOwner().equals(chatId)) {
                 String textToSend =
                         EmojiParser.parseToUnicode(messageText.substring(messageText.indexOf(" ")));
-                Iterable<User> users = userRepository.findAll();
+                List<User> users = userRepository.findAll();
                 for (User user : users) {
                     prepareAndSendMessage(user.getChatId(), textToSend);
                 }
@@ -116,33 +122,32 @@ public class TelegramBot extends TelegramLongPollingBot {
         SendMessage message = new SendMessage();
         message.setChatId(chatId.toString());
         message.setText("Do you really want to register?");
-
         InlineKeyboardMarkup inlineKeyboardMarkup = new InlineKeyboardMarkup();
-        List<List<InlineKeyboardButton>> rowsInLine = new ArrayList<>();
-        List<InlineKeyboardButton> rowInLine = new ArrayList<>();
-        InlineKeyboardButton yesButton = new InlineKeyboardButton();
-
-        yesButton.setText("Yes");
-        yesButton.setCallbackData(YES_BUTTON);
-
-        InlineKeyboardButton noButton = new InlineKeyboardButton();
-        noButton.setText("No");
-        noButton.setCallbackData(NO_BUTTON);
-
-        rowInLine.add(yesButton);
-        rowInLine.add(noButton);
-
-        rowsInLine.add(rowInLine);
+        List<List<InlineKeyboardButton>> rowsInLine = createButtons();
         inlineKeyboardMarkup.setKeyboard(rowsInLine);
         message.setReplyMarkup(inlineKeyboardMarkup);
         executeMessage(message);
+    }
+
+    private static List<List<InlineKeyboardButton>> createButtons() {
+        List<List<InlineKeyboardButton>> rowsInLine = new ArrayList<>();
+        List<InlineKeyboardButton> rowInLine = new ArrayList<>();
+        InlineKeyboardButton yesButton = new InlineKeyboardButton();
+        yesButton.setText("Yes");
+        yesButton.setCallbackData(YES_BUTTON);
+        InlineKeyboardButton noButton = new InlineKeyboardButton();
+        noButton.setText("No");
+        noButton.setCallbackData(NO_BUTTON);
+        rowInLine.add(yesButton);
+        rowInLine.add(noButton);
+        rowsInLine.add(rowInLine);
+        return rowsInLine;
     }
 
     private void registerUser(Message message) {
         if (userRepository.findById(message.getChatId()).isEmpty()) {
             Long chatId = message.getChatId();
             Chat chat = message.getChat();
-
             User user = new User();
             user.setChatId(chatId);
             user.setFirstName(chat.getFirstName());
@@ -213,5 +218,16 @@ public class TelegramBot extends TelegramLongPollingBot {
         message.setChatId(String.valueOf(chatId));
         message.setText(textToSend);
         executeMessage(message);
+    }
+
+    @Scheduled(cron = "${cron.scheduler}")
+    private void sendAd() {
+        List<Ad> ads = adRepository.findAll();
+        List<User> users = userRepository.findAll();
+        for (Ad ad : ads) {
+            for (User user : users) {
+                prepareAndSendMessage(user.getChatId(), ad.getAdText());
+            }
+        }
     }
 }
